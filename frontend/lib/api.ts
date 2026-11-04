@@ -1,5 +1,8 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
+import { handleMockApi, resetDemoDB } from "./mock-api";
+
+export { resetDemoDB };
 
 export type Row = Record<string, any>;
 export type Session = { token: string; user: { id: number; username: string; name: string; role: Role; staff_id?: number; patient_id?: number } };
@@ -27,22 +30,47 @@ export class ApiError extends Error {
 }
 
 export async function api<T = any>(path: string, opts: { method?: string; body?: unknown } = {}): Promise<T> {
+  // If deployed on Vercel or non-localhost, or explicitly in demo mode: use built-in mock API
+  const isDemo =
+    typeof window !== "undefined" &&
+    (window.location.hostname.includes("vercel.app") ||
+      !window.location.hostname.includes("localhost") ||
+      process.env.NEXT_PUBLIC_DEMO_MODE === "true");
+
+  if (isDemo) {
+    try {
+      return await handleMockApi<T>(path, opts as any);
+    } catch (e: any) {
+      throw new ApiError(400, e.message || "Operation failed");
+    }
+  }
+
   const s = getSession();
-  const res = await fetch(path, {
-    method: opts.method || (opts.body ? "POST" : "GET"),
-    headers: { "Content-Type": "application/json", ...(s ? { Authorization: `Bearer ${s.token}` } : {}) },
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
-  if (res.status === 401 && s) {
-    setSession(null);
-    window.location.href = "/login";
+  try {
+    const res = await fetch(path, {
+      method: opts.method || (opts.body ? "POST" : "GET"),
+      headers: { "Content-Type": "application/json", ...(s ? { Authorization: `Bearer ${s.token}` } : {}) },
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+    });
+    if (res.status === 401 && s) {
+      setSession(null);
+      window.location.href = "/login";
+    }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      // If backend is offline (500 proxy error), seamlessly fallback to mock API
+      if (res.status >= 500) {
+        return await handleMockApi<T>(path, opts as any);
+      }
+      const d = (data as any).detail;
+      throw new ApiError(res.status, typeof d === "string" ? d : Array.isArray(d) ? d.map((x: any) => x.msg).join(", ") : `Request failed (${res.status})`);
+    }
+    return data as T;
+  } catch (err: any) {
+    if (err instanceof ApiError) throw err;
+    // Network error: fallback to mock API
+    return await handleMockApi<T>(path, opts as any);
   }
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const d = (data as any).detail;
-    throw new ApiError(res.status, typeof d === "string" ? d : Array.isArray(d) ? d.map((x: any) => x.msg).join(", ") : `Request failed (${res.status})`);
-  }
-  return data as T;
 }
 
 export const qs = (p: Row) =>

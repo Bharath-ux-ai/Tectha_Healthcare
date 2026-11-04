@@ -1,6 +1,6 @@
 import type { NextConfig } from "next";
 
-const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:8000";
+const BACKEND_URL = process.env.BACKEND_URL;
 
 const nextConfig: NextConfig = {
   turbopack: {
@@ -8,9 +8,12 @@ const nextConfig: NextConfig = {
       "*.css": { loaders: ["@tailwindcss/turbopack"], as: "*.css" },
     },
   },
-  // Browser calls /api/* on the Next.js origin; Next proxies them to FastAPI (no CORS setup needed).
+  // Browser calls /api/* on the Next.js origin; Next proxies them to FastAPI in development or if BACKEND_URL is set
   async rewrites() {
-    return [{ source: "/api/:path*", destination: `${BACKEND_URL}/api/:path*` }];
+    if (BACKEND_URL || process.env.NODE_ENV === "development") {
+      return [{ source: "/api/:path*", destination: `${BACKEND_URL || "http://localhost:8000"}/api/:path*` }];
+    }
+    return [];
   },
 };
 
