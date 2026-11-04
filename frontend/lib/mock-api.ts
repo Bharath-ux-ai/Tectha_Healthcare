@@ -311,7 +311,6 @@ export async function handleMockApi<T = any>(
     if (!rx) throw new Error("Prescription not found");
     rx.status = "dispensed";
     rx.dispensed_at = new Date().toISOString();
-    // Add charge
     const totalAmount = (rx.items || []).reduce((acc: number, it: any) => acc + (Number(it.qty) || 1) * 35, 0);
     db.charges.push({
       id: db.charges.length + 1,
@@ -414,7 +413,7 @@ export async function handleMockApi<T = any>(
       balance: total,
       status: "unpaid",
       tpa_name: body.tpa_name || null,
-      claim_status: body.tpa_name ? "submitted" : null,
+      claim_status: body.tpa_name ? "submitted" : "none",
       created_at: new Date().toISOString(),
     };
     db.invoices.push(inv);
@@ -431,8 +430,11 @@ export async function handleMockApi<T = any>(
     if (!inv) throw new Error("Invoice not found");
     const charges = (db.charges || []).filter((c) => c.invoice_id === invId);
     const payments = (db.payments || []).filter((p) => p.invoice_id === invId);
+    const patient = (db.patients || []).find((p) => p.id === inv.patient_id) || {};
+    const enriched = enrichRows(db, [inv])[0];
     return {
-      invoice: enrichRows(db, [inv])[0],
+      ...enriched,
+      patient,
       items: charges,
       payments,
     } as T;
@@ -460,7 +462,10 @@ export async function handleMockApi<T = any>(
       created_at: new Date().toISOString(),
     });
     saveDemoDB(db);
-    return enrichRows(db, [inv])[0] as T;
+    const patient = (db.patients || []).find((p) => p.id === inv.patient_id) || {};
+    const charges = (db.charges || []).filter((c) => c.invoice_id === invId);
+    const payments = (db.payments || []).filter((p) => p.invoice_id === invId);
+    return { ...enrichRows(db, [inv])[0], patient, items: charges, payments } as T;
   }
 
   // Claim invoice
@@ -471,33 +476,78 @@ export async function handleMockApi<T = any>(
     if (!inv) throw new Error("Invoice not found");
     inv.claim_status = body.status || "approved";
     saveDemoDB(db);
-    return enrichRows(db, [inv])[0] as T;
+    const patient = (db.patients || []).find((p) => p.id === inv.patient_id) || {};
+    const charges = (db.charges || []).filter((c) => c.invoice_id === invId);
+    const payments = (db.payments || []).filter((p) => p.invoice_id === invId);
+    return { ...enrichRows(db, [inv])[0], patient, items: charges, payments } as T;
   }
 
-  // Finance summary
+  // Finance summary (matching Reports component in finance/page.tsx)
   if (cleanPath === "/api/finance/summary") {
-    const invoices = db.invoices || [];
-    const payments = db.payments || [];
-    const expenses = db.expenses || [];
-    const totalRev = payments.filter((p) => p.kind !== "advance-adjustment").reduce((s, p) => s + p.amount, 0);
-    const totalExp = expenses.reduce((s, e) => s + e.amount, 0);
-    const outstanding = invoices.reduce((s, i) => s + (i.balance || 0), 0);
+    const invs = db.invoices || [];
+    const pays = db.payments || [];
+    const exps = db.expenses || [];
+    const collected =
+      pays.filter((p) => ["payment", "advance", "insurance"].includes(p.kind)).reduce((s, p) => s + p.amount, 0) -
+      pays.filter((p) => p.kind === "refund").reduce((s, p) => s + p.amount, 0);
+    const totalExp = exps.reduce((s, e) => s + e.amount, 0);
+    const outstanding = invs.reduce((s, i) => s + Math.max(i.balance || 0, 0), 0);
+    const billed = invs.reduce((s, i) => s + (i.total || 0), 0);
+
+    const days = Array.from({ length: 14 }, (_, i) => {
+      const dt = new Date();
+      dt.setDate(dt.getDate() - (13 - i));
+      return dt.toISOString().slice(5, 10);
+    });
+
     return {
-      total_revenue: totalRev,
-      total_expenses: totalExp,
-      net_income: totalRev - totalExp,
-      outstanding_receivables: outstanding,
-      tpa_claims_pending: invoices.filter((i) => i.claim_status === "submitted").length,
+      billed: Math.round(billed),
+      collected: Math.round(collected),
+      outstanding: Math.round(outstanding),
+      refunds: 1500,
+      expenses: Math.round(totalExp),
+      net: Math.round(collected - totalExp),
+      daily: days.map((date, idx) => ({
+        date,
+        collections: 12000 + (idx % 4) * 3500,
+        expenses: 6000 + (idx % 3) * 2000,
+      })),
+      by_source: [
+        { name: "Consultations", value: 38000 },
+        { name: "Pharmacy", value: 52000 },
+        { name: "Lab & Radiology", value: 41000 },
+        { name: "Bed charges", value: 47000 },
+      ],
+      by_mode: [
+        { name: "UPI", value: 74000 },
+        { name: "Card", value: 58000 },
+        { name: "Cash", value: 46000 },
+      ],
+      expense_by_category: [
+        { name: "Salaries", value: 85000 },
+        { name: "Consumables", value: 32000 },
+        { name: "Utilities", value: 18000 },
+        { name: "Maintenance", value: 14000 },
+      ],
     } as T;
   }
 
-  // Dashboard Stats
+  // Dashboard Stats (exact fields expected by dashboard/page.tsx)
   if (cleanPath === "/api/dashboard") {
     const today = todayStr();
     const appts = db.appointments || [];
+    const apptsToday = appts.filter((a) => a.date === today && a.status !== "cancelled");
     const beds = db.beds || [];
-    const occupied = beds.filter((b) => b.status === "occupied").length;
-    const complaints = (db.complaints || []).filter((c) => c.status !== "resolved").length;
+    const occ = beds.filter((b) => b.status === "occupied").length;
+    const feedback = db.feedback || [];
+    const avgRating = feedback.length ? feedback.reduce((s, f) => s + f.rating, 0) / feedback.length : 4.8;
+    const complaints = db.complaints || [];
+
+    const weekDays = Array.from({ length: 7 }, (_, i) => {
+      const dt = new Date();
+      dt.setDate(dt.getDate() - (6 - i));
+      return dt.toISOString().slice(5, 10);
+    });
 
     const statusCounts: Record<string, number> = {};
     for (const a of appts.filter((a) => a.date === today)) {
@@ -510,44 +560,72 @@ export async function handleMockApi<T = any>(
     }
 
     return {
-      today_appts: appts.filter((a) => a.date === today).length || 8,
-      active_patients: (db.patients || []).length || 17,
-      bed_occ: Math.round((occupied / (beds.length || 1)) * 100) || 35,
-      pharmacy_sales_today: 4850,
-      lab_orders_pending: (db.lab_orders || []).filter((l) => l.status !== "completed" && l.status !== "reported").length || 4,
-      unresolved_complaints: complaints || 1,
+      patients: (db.patients || []).length || 17,
+      new_patients_month: 8,
+      appointments_today: apptsToday.length || 8,
       appt_status_today: statusCounts,
-      bed_status: bedCounts,
-      monthly_trend: [
-        { month: "Jan", revenue: 145000, footfall: 310 },
-        { month: "Feb", revenue: 168000, footfall: 360 },
-        { month: "Mar", revenue: 195000, footfall: 420 },
-        { month: "Apr", revenue: 182000, footfall: 390 },
-        { month: "May", revenue: 224000, footfall: 490 },
+      waiting: appts.filter((a) => a.date === today && a.status === "checked-in").length || 2,
+      admitted: (db.admissions || []).filter((a) => a.status === "admitted").length || 4,
+      beds_total: beds.length || 20,
+      beds_occupied: occ || 7,
+      occupancy_pct: Math.round(((occ || 7) / (beds.length || 20)) * 100),
+      pending_labs: (db.lab_orders || []).filter((l) => !["completed", "reported", "cancelled"].includes(l.status)).length || 4,
+      pending_rx: (db.prescriptions || []).filter((p) => p.status === "pending").length || 3,
+      collections_today: 18450,
+      outstanding: (db.invoices || []).reduce((s, i) => s + Math.max(i.balance || 0, 0), 0) || 12800,
+      avg_rating: Math.round(avgRating * 10) / 10,
+      open_complaints: complaints.filter((c) => c.status !== "resolved").length || 1,
+      appointments_week: weekDays.map((d, i) => ({ date: d, count: 6 + (i % 3) * 4 })),
+      revenue_week: weekDays.map((d, i) => ({ date: d, amount: 14000 + (i % 4) * 4500 })),
+      department_load: [
+        { name: "General Medicine", value: 18 },
+        { name: "Cardiology", value: 12 },
+        { name: "Pediatrics", value: 9 },
+        { name: "Orthopedics", value: 7 },
       ],
-      revenue_split: [
-        { name: "Consultations", value: 45000 },
-        { name: "Pharmacy", value: 68000 },
-        { name: "Diagnostics", value: 52000 },
-        { name: "Inpatient Beds", value: 59000 },
-      ],
+      bed_status: Object.entries(bedCounts).map(([name, value]) => ({ name, value })),
+      recent_activity: (db.audit_logs || []).slice(0, 8),
     } as T;
   }
 
-  // Engagement Summary
+  // Engagement Summary (exact fields expected by engagement/page.tsx)
   if (cleanPath === "/api/engagement/summary") {
     const feedback = db.feedback || [];
-    const avgRating = feedback.length ? feedback.reduce((s, f) => s + f.rating, 0) / feedback.length : 4.6;
+    const ratings = feedback.map((f) => f.rating);
+    const avgRating = ratings.length ? ratings.reduce((a, b) => a + b, 0) / ratings.length : 4.8;
+    const complaints = db.complaints || [];
+
     return {
-      total_sent: (db.notifications || []).length,
-      average_rating: Math.round(avgRating * 10) / 10,
-      open_complaints: (db.complaints || []).filter((c) => c.status !== "resolved").length,
-      active_campaigns: (db.campaigns || []).length,
-      sentiment_split: [
-        { name: "5 Stars", value: feedback.filter((f) => f.rating === 5).length || 10 },
-        { name: "4 Stars", value: feedback.filter((f) => f.rating === 4).length || 5 },
-        { name: "3 Stars & below", value: feedback.filter((f) => f.rating <= 3).length || 3 },
+      avg_rating: Math.round(avgRating * 10) / 10,
+      responses: ratings.length || 18,
+      promoters_pct: Math.round((ratings.filter((r) => r >= 4).length / (ratings.length || 1)) * 100) || 89,
+      distribution: [1, 2, 3, 4, 5].map((i) => ({ name: `${i}★`, value: ratings.filter((r) => r === i).length })),
+      by_category: [
+        { name: "Doctor", value: 4.9 },
+        { name: "Nursing", value: 4.7 },
+        { name: "Facilities", value: 4.6 },
+        { name: "Billing", value: 4.5 },
       ],
+      complaints: {
+        open: complaints.filter((c) => c.status === "open").length,
+        "in-progress": complaints.filter((c) => c.status === "in-progress").length,
+        resolved: complaints.filter((c) => c.status === "resolved").length,
+      },
+      notifications_by_channel: [
+        { name: "WhatsApp", value: 68 },
+        { name: "SMS", value: 24 },
+        { name: "Email", value: 12 },
+      ],
+      notifications_by_category: [
+        { name: "appointment", value: 38 },
+        { name: "reminder", value: 22 },
+        { name: "billing", value: 16 },
+        { name: "lab", value: 14 },
+      ],
+      patients_total: (db.patients || []).length || 17,
+      patients_visited: 14,
+      returning: 8,
+      retention_pct: 57.1,
     } as T;
   }
 
@@ -568,7 +646,25 @@ export async function handleMockApi<T = any>(
     return n as T;
   }
 
-  // Portal: Me
+  // Reminders run
+  if (cleanPath === "/api/reminders/run" && method === "POST") {
+    return { kind: body.kind || "appointment", sent: 4 } as T;
+  }
+
+  // Campaign send
+  const campSendMatch = cleanPath.match(/^\/api\/campaigns\/(\d+)\/send$/);
+  if (campSendMatch && method === "POST") {
+    const cid = Number(campSendMatch[1]);
+    const c = (db.campaigns || []).find((x) => x.id === cid);
+    if (c) {
+      c.status = "sent";
+      c.sent_count = (db.patients || []).length || 17;
+      saveDemoDB(db);
+      return c as T;
+    }
+  }
+
+  // Portal: Me (exact fields expected by portal/page.tsx)
   if (cleanPath === "/api/portal/me") {
     const raw = typeof window !== "undefined" ? localStorage.getItem("tecthha.session") : null;
     const session = raw ? JSON.parse(raw) : null;
@@ -578,11 +674,51 @@ export async function handleMockApi<T = any>(
     return {
       patient: p,
       appointments: enrichRows(db, (db.appointments || []).filter((a) => a.patient_id === p.id)),
+      encounters: enrichRows(db, (db.encounters || []).filter((e) => e.patient_id === p.id)),
       prescriptions: enrichRows(db, (db.prescriptions || []).filter((r) => r.patient_id === p.id)),
-      lab_orders: enrichRows(db, (db.lab_orders || []).filter((l) => l.patient_id === p.id)),
+      labs: enrichRows(db, (db.lab_orders || []).filter((l) => l.patient_id === p.id)),
       invoices: enrichRows(db, (db.invoices || []).filter((i) => i.patient_id === p.id)),
-      messages: (db.notifications || []).filter((n) => n.patient_id === p.id),
+      notifications: (db.notifications || []).filter((n) => n.patient_id === p.id),
+      vitals: enrichRows(db, (db.vitals || []).filter((v) => v.patient_id === p.id)),
+      allergies: (db.allergies || []).filter((a) => a.patient_id === p.id),
+      admissions: enrichRows(db, (db.admissions || []).filter((a) => a.patient_id === p.id)),
+      feedback: (db.feedback || []).filter((f) => f.patient_id === p.id),
     } as T;
+  }
+
+  // Portal appointments
+  if (cleanPath === "/api/portal/appointments") {
+    if (method === "POST") {
+      const raw = typeof window !== "undefined" ? localStorage.getItem("tecthha.session") : null;
+      const session = raw ? JSON.parse(raw) : null;
+      const pid = session?.user?.patient_id || 1;
+      const newId = (db.appointments || []).length + 1;
+      const appt = {
+        id: newId,
+        patient_id: pid,
+        doctor_id: Number(body.doctor_id),
+        date: body.date,
+        time: body.time,
+        token: (db.appointments || []).filter((a) => a.doctor_id === Number(body.doctor_id) && a.date === body.date).length + 1,
+        status: "booked",
+        type: body.type || "in-person",
+        reason: body.reason || "Consultation",
+        created_at: new Date().toISOString(),
+      };
+      db.appointments.push(appt);
+      saveDemoDB(db);
+      return enrichRows(db, [appt])[0] as T;
+    }
+  }
+
+  const portalApptMatch = cleanPath.match(/^\/api\/portal\/appointments\/(\d+)$/);
+  if (portalApptMatch && method === "PATCH") {
+    const aid = Number(portalApptMatch[1]);
+    const a = (db.appointments || []).find((x) => x.id === aid);
+    if (!a) throw new Error("Appointment not found");
+    Object.assign(a, body);
+    saveDemoDB(db);
+    return enrichRows(db, [a])[0] as T;
   }
 
   // Portal feedback & complaints
@@ -717,4 +853,3 @@ export async function handleMockApi<T = any>(
   console.warn("Unhandled Mock API route:", method, cleanPath);
   return { ok: true } as T;
 }
-
