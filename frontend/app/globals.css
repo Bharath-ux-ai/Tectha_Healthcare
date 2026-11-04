@@ -1,0 +1,34 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", "Segoe UI", ui-sans-serif, system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
+  --color-brand-50: #eff5ff;
+  --color-brand-100: #dbe8fe;
+  --color-brand-200: #bfd5fd;
+  --color-brand-500: #2f6fe4;
+  --color-brand-600: #1f5bd0;
+  --color-brand-700: #1a49a8;
+  --color-brand-900: #0f2a5c;
+  --color-teal-50: #effaf8;
+  --color-teal-100: #d3f2ec;
+  --color-teal-500: #13a08d;
+  --color-teal-600: #0e8574;
+  --color-teal-700: #0f6b5e;
+  --color-ink: #0f1b2d;
+  --color-muted: #5b6b80;
+  --color-line: #e3e8ef;
+  --color-canvas: #f6f8fb;
+}
+
+html, body { background: var(--color-canvas); color: var(--color-ink); }
+body { font-family: var(--font-sans); font-feature-settings: "cv11", "ss01"; -webkit-font-smoothing: antialiased; }
+::selection { background: var(--color-brand-100); }
+.num { font-variant-numeric: tabular-nums; }
+dialog::backdrop { background: rgb(15 27 45 / 0.45); }
+
+@media print {
+  body * { visibility: hidden; }
+  .print-area, .print-area * { visibility: visible; }
+  .print-area { position: fixed; inset: 0; padding: 24px; background: white; }
+  .no-print { display: none !important; }
+}
