@@ -1,6 +1,6 @@
 import seedData from "./demo-data.json";
 
-const DB_KEY = "tecthha_demo_db_v2";
+const DB_KEY = "tecthha_demo_db_v5";
 
 type DB = Record<string, any[]>;
 
@@ -12,7 +12,12 @@ export function getDemoDB(): DB {
       localStorage.setItem(DB_KEY, JSON.stringify(seedData));
       return JSON.parse(JSON.stringify(seedData));
     }
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    if (!parsed.patients || parsed.patients.length === 0) {
+      localStorage.setItem(DB_KEY, JSON.stringify(seedData));
+      return JSON.parse(JSON.stringify(seedData));
+    }
+    return parsed;
   } catch {
     return JSON.parse(JSON.stringify(seedData));
   }
@@ -768,13 +773,17 @@ export async function handleMockApi<T = any>(
         );
       }
       for (const [key, val] of params.entries()) {
-        if (!["q", "sort", "order", "limit", "offset"].includes(key) && val !== "") {
-          if (val.includes(",")) {
-            const arr = val.split(",");
-            filtered = filtered.filter((r) => arr.includes(String(r[key])));
-          } else {
-            filtered = filtered.filter((r) => String(r[key]) === val);
-          }
+        if (key.startsWith("_") || ["q", "sort", "order", "limit", "offset"].includes(key) || val === "") {
+          continue;
+        }
+        if (list.length > 0 && !(key in list[0])) {
+          continue;
+        }
+        if (val.includes(",")) {
+          const arr = val.split(",");
+          filtered = filtered.filter((r) => arr.includes(String(r[key])));
+        } else {
+          filtered = filtered.filter((r) => String(r[key]) === String(val));
         }
       }
       const sort = params.get("sort") || "id";
