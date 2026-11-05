@@ -6,6 +6,19 @@ import { CrudSection, DataTable } from "@/components/data";
 import { RxView } from "@/components/clinical";
 import { Badge, Button, Card, Empty, ErrorBox, Field, Input, Modal, PageHeader, Select, Stat, Tabs, useConfirm, useToast } from "@/components/ui";
 
+function parseItems(items: any): Row[] {
+  if (Array.isArray(items)) return items;
+  if (typeof items === "string") {
+    try {
+      const parsed = JSON.parse(items);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
 export default function Pharmacy() {
   const toast = useToast();
   const confirm = useConfirm();
@@ -29,8 +42,8 @@ export default function Pharmacy() {
       <PageHeader module="Module 5 · Pharmacy" title="Pharmacy" subtitle="Prescription-linked dispensing with batch, expiry and stock control." />
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Prescriptions to dispense" value={s.data?.pending_rx ?? "—"} icon={Pill} />
-        <Stat label="Low-stock items" value={s.data?.low_stock.length ?? "—"} icon={AlertTriangle} tone="red" />
-        <Stat label="Expiring ≤ 90 days" value={s.data?.expiring_soon.length ?? "—"} icon={CalendarX} tone="amber" sub={`${s.data?.expired.length ?? 0} expired batches with stock`} />
+        <Stat label="Low-stock items" value={s.data?.low_stock?.length ?? "—"} icon={AlertTriangle} tone="red" />
+        <Stat label="Expiring ≤ 90 days" value={s.data?.expiring_soon?.length ?? "—"} icon={CalendarX} tone="amber" sub={`${s.data?.expired?.length ?? 0} expired batches with stock`} />
         <Stat label="Saleable stock value" value={inr(s.data?.stock_value)} icon={PackageCheck} tone="teal" />
       </div>
       <Tabs value={tab} onChange={setTab} tabs={[{ id: "queue", label: "Dispensing queue", count: s.data?.pending_rx }, { id: "inv", label: "Inventory & batches" }, { id: "alerts", label: "Stock alerts" }, { id: "po", label: "Purchase orders" }, { id: "sup", label: "Suppliers" }]} />
@@ -39,9 +52,9 @@ export default function Pharmacy() {
           columns={[{ key: "id", label: "Rx", render: (r) => <span className="num">#{r.id}</span> }, { key: "created_at", label: "Prescribed", render: (r) => fmtDate(r.created_at) },
             { key: "patient_name", label: "Patient", render: (r) => <>{r.patient_name}<span className="block text-xs text-muted">{r.patient_uhid}</span></> },
             { key: "doctor_name", label: "Doctor", render: (r) => r.doctor_name },
-            { key: "items", label: "Medicines", render: (r) => <span className="text-xs">{r.items.map((i: Row) => `${i.medicine} ×${i.qty}`).join(", ")}</span> },
+            { key: "items", label: "Medicines", render: (r) => <span className="text-xs">{parseItems(r.items).map((i: Row) => `${i.medicine || i.name} ×${i.qty}`).join(", ")}</span> },
             { key: "status", label: "Status", render: (r) => <Badge>{r.status}</Badge> }]}
-          actions={(r) => <Button size="sm" variant={r.status === "pending" ? "primary" : "ghost"} onClick={() => setRx(r)}>{r.status === "pending" ? "Dispense" : "View"}</Button>} />
+          actions={(r) => <Button size="sm" variant={r.status === "pending" ? "primary" : "ghost"} onClick={() => setRx({ ...r, items: parseItems(r.items) })}>{r.status === "pending" ? "Dispense" : "View"}</Button>} />
       )}
       {tab === "inv" && (
         <CrudSection key={k} res="medicines" title="Medicine batch" defaults={{ form: "Tablet", reorder_level: 50 }} searchPlaceholder="Search medicine, generic or batch"
@@ -60,16 +73,16 @@ export default function Pharmacy() {
       {tab === "alerts" && (
         <div className="grid gap-4 lg:grid-cols-3">
           <Card title="Low stock (≤ reorder level)" pad={false}>
-            {!s.data?.low_stock.length ? <Empty title="All items above reorder level" /> : <ul className="divide-y divide-line text-sm">{s.data.low_stock.map((x: Row) => (
+            {!(s.data?.low_stock || []).length ? <Empty title="All items above reorder level" /> : <ul className="divide-y divide-line text-sm">{(s.data?.low_stock || []).map((x: Row) => (
               <li key={x.name} className="flex items-center justify-between px-4 py-2.5"><span>{x.name}</span><span className="num text-xs"><b className="text-red-700">{x.stock}</b> / {x.reorder_level}</span></li>))}</ul>}
-            {!!s.data?.low_stock.length && <div className="border-t border-line p-3"><Button size="sm" className="w-full" onClick={() => setPo(true)}><PackagePlus className="size-4" /> Raise purchase order</Button></div>}
+            {!!(s.data?.low_stock || []).length && <div className="border-t border-line p-3"><Button size="sm" className="w-full" onClick={() => setPo(true)}><PackagePlus className="size-4" /> Raise purchase order</Button></div>}
           </Card>
           <Card title="Expiring within 90 days" pad={false}>
-            {!s.data?.expiring_soon.length ? <Empty /> : <ul className="divide-y divide-line text-sm">{s.data.expiring_soon.map((x: Row) => (
+            {!(s.data?.expiring_soon || []).length ? <Empty /> : <ul className="divide-y divide-line text-sm">{(s.data?.expiring_soon || []).map((x: Row) => (
               <li key={x.id} className="flex items-center justify-between px-4 py-2.5"><span>{x.name}<span className="block font-mono text-xs text-muted">{x.batch_no} · {x.stock} units</span></span><Badge tone="amber">{fmtDate(x.expiry_date)}</Badge></li>))}</ul>}
           </Card>
           <Card title="Expired batches (blocked from dispensing)" pad={false}>
-            {!s.data?.expired.length ? <Empty /> : <ul className="divide-y divide-line text-sm">{s.data.expired.map((x: Row) => (
+            {!(s.data?.expired || []).length ? <Empty /> : <ul className="divide-y divide-line text-sm">{(s.data?.expired || []).map((x: Row) => (
               <li key={x.id} className="flex items-center justify-between gap-2 px-4 py-2.5"><span>{x.name}<span className="block font-mono text-xs text-muted">{x.batch_no} · {x.stock} units</span></span>
                 <Button size="sm" variant="danger" onClick={async () => { if (await confirm(`Write off ${x.stock} expired units of ${x.name} (${x.batch_no})?`, { danger: true, label: "Write off" })) { await api(`/api/r/medicines/${x.id}`, { method: "PATCH", body: { stock: 0 } }); toast("Batch written off"); reload(); } }}>Write off</Button></li>))}</ul>}
           </Card>
@@ -79,7 +92,7 @@ export default function Pharmacy() {
         <DataTable res="purchase-orders" reloadKey={k} filters={[{ key: "status", label: "Status", options: ["ordered", "received", "cancelled"] }]}
           toolbar={<Button onClick={() => setPo(true)}><Plus className="size-4" /> New purchase order</Button>}
           columns={[{ key: "po_number", label: "PO", render: (r) => <span className="font-mono text-xs">{r.po_number}</span> }, { key: "supplier_name", label: "Supplier", render: (r) => r.supplier_name },
-            { key: "items", label: "Items", render: (r) => <span className="text-xs">{r.items.map((i: Row) => `${i.name} ×${i.qty}`).join(", ")}</span> },
+            { key: "items", label: "Items", render: (r) => <span className="text-xs">{parseItems(r.items).map((i: Row) => `${i.name || i.medicine} ×${i.qty}`).join(", ")}</span> },
             { key: "total", label: "Total", render: (r) => inr(r.total) }, { key: "expected_date", label: "Expected", render: (r) => fmtDate(r.expected_date) }, { key: "status", label: "Status", render: (r) => <Badge>{r.status}</Badge> }]}
           actions={(r) => r.status === "ordered" && <>
             <Button size="sm" variant="secondary" onClick={async () => { if (await confirm(`Receive ${r.po_number} into stock? New batches will be created.`)) { try { await api(`/api/purchase-orders/${r.id}/receive`, { body: {} }); toast("Goods received · stock updated · expense recorded"); reload(); } catch (e: any) { toast(e.message, "error"); } } }}><PackageCheck className="size-3.5" /> Receive</Button>
@@ -131,7 +144,7 @@ function POModal({ open, onClose, prefill, onDone }: { open: boolean; onClose: (
           <Field label="Supplier" required><Select value={sup} onChange={(e) => setSup(e.target.value)} placeholder="Select supplier" options={(sups?.items || []).map((s) => ({ value: s.id, label: s.name }))} /></Field>
           <Field label="Expected delivery"><Input type="date" value={exp} onChange={(e) => setExp(e.target.value)} /></Field>
         </div>
-        <datalist id="po-cat">{cat?.map((c) => <option key={c.name} value={c.name} />)}</datalist>
+        <datalist id="po-cat">{(Array.isArray(cat) ? cat : []).map((c) => <option key={c.name} value={c.name} />)}</datalist>
         {items.map((it, i) => (
           <div key={i} className="grid grid-cols-12 gap-2">
             <Input className="col-span-6" list="po-cat" placeholder="Medicine" value={it.name} onChange={(e) => set(i, "name", e.target.value)} />

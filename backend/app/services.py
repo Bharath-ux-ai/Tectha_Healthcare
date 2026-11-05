@@ -304,7 +304,7 @@ def pharmacy_catalog(db: Session = Depends(get_db), user=Depends(current_user)):
 
 
 @router.get("/pharmacy/summary")
-def pharmacy_summary(db: Session = Depends(get_db), user=Depends(require("pharmacist", "doctor"))):
+def pharmacy_summary(db: Session = Depends(get_db), user=Depends(require("pharmacist", "doctor", "nurse", "receptionist", "accountant"))):
     t, soon = today(), (date.today() + timedelta(days=90)).isoformat()
     meds = db.query(m.Medicine).all()
     by_name = defaultdict(int)

@@ -127,6 +127,11 @@ export function PrintDoc({ title, meta, children }: { title: string; meta?: Reac
 }
 
 export function RxView({ rx }: { rx: Row }) {
+  const items: Row[] = Array.isArray(rx.items)
+    ? rx.items
+    : typeof rx.items === "string"
+    ? (() => { try { return JSON.parse(rx.items); } catch { return []; } })()
+    : [];
   return (
     <div className="rounded-md border border-line">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line bg-slate-50/60 px-3 py-2 text-xs">
@@ -134,7 +139,7 @@ export function RxView({ rx }: { rx: Row }) {
       </div>
       <table className="w-full text-sm">
         <tbody>
-          {(rx.items || []).map((i: Row, k: number) => (
+          {items.map((i: Row, k: number) => (
             <tr key={k} className="border-b border-line last:border-0">
               <td className="px-3 py-2 font-medium">{i.medicine}</td><td className="px-3 py-2 text-muted">{i.dosage} · {i.frequency} · {i.days}d</td>
               <td className="num px-3 py-2">×{i.qty}</td><td className="px-3 py-2 text-xs text-muted">{i.instructions}{i.dispensed?.length ? ` · batch ${i.dispensed.map((d: Row) => d.batch_no).join(", ")}` : ""}</td>

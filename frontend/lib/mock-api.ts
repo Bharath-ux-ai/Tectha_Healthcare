@@ -59,6 +59,13 @@ function enrichRows(db: DB, rows: any[]): any[] {
 
   return rows.map((r) => {
     const d = { ...r };
+    if (typeof d.items === "string") {
+      try {
+        d.items = JSON.parse(d.items);
+      } catch {
+        d.items = [];
+      }
+    }
     if (d.patient_id && pMap.has(d.patient_id)) {
       const p = pMap.get(d.patient_id);
       d.patient_name = p.name;
@@ -157,16 +164,25 @@ export async function handleMockApi<T = any>(
 
   // RBAC matrix
   if (cleanPath === "/api/rbac") {
-    return {
-      admin: ["dashboard", "patients", "appointments", "clinical", "operations", "finance", "diagnostics", "pharmacy", "engagement"],
-      doctor: ["dashboard", "clinical", "appointments", "patients"],
-      nurse: ["dashboard", "clinical", "operations", "patients"],
-      receptionist: ["dashboard", "patients", "appointments", "operations", "engagement"],
-      lab: ["dashboard", "diagnostics"],
-      pharmacist: ["dashboard", "pharmacy"],
-      accountant: ["dashboard", "finance"],
-      patient: ["portal"],
-    } as T;
+    const matrix = [
+      { resource: "patients", read: ["admin", "doctor", "nurse", "receptionist"], write: ["admin", "doctor", "nurse", "receptionist"] },
+      { resource: "appointments", read: ["admin", "doctor", "nurse", "receptionist"], write: ["admin", "doctor", "nurse", "receptionist"] },
+      { resource: "vitals", read: ["admin", "doctor", "nurse"], write: ["admin", "doctor", "nurse"] },
+      { resource: "allergies", read: ["admin", "doctor", "nurse", "pharmacist"], write: ["admin", "doctor", "nurse"] },
+      { resource: "encounters", read: ["admin", "doctor", "nurse"], write: ["admin", "doctor"] },
+      { resource: "prescriptions", read: ["admin", "doctor", "nurse", "pharmacist"], write: ["admin", "doctor"] },
+      { resource: "lab-orders", read: ["admin", "doctor", "nurse", "lab", "receptionist"], write: ["admin", "doctor", "lab"] },
+      { resource: "admissions", read: ["admin", "doctor", "nurse", "receptionist"], write: ["admin", "doctor", "nurse", "receptionist"] },
+      { resource: "beds", read: ["admin", "doctor", "nurse", "receptionist"], write: ["admin", "nurse", "receptionist"] },
+      { resource: "medicines", read: ["admin", "pharmacist", "doctor", "nurse"], write: ["admin", "pharmacist"] },
+      { resource: "suppliers", read: ["admin", "pharmacist", "accountant"], write: ["admin", "pharmacist"] },
+      { resource: "purchase-orders", read: ["admin", "pharmacist", "accountant"], write: ["admin", "pharmacist"] },
+      { resource: "charges", read: ["admin", "accountant", "receptionist"], write: ["admin", "accountant"] },
+      { resource: "invoices", read: ["admin", "accountant", "receptionist"], write: ["admin"] },
+      { resource: "payments", read: ["admin", "accountant", "receptionist"], write: ["admin"] },
+      { resource: "expenses", read: ["admin", "accountant"], write: ["admin", "accountant"] },
+    ];
+    return matrix as T;
   }
 
   // Doctors
@@ -316,7 +332,12 @@ export async function handleMockApi<T = any>(
     if (!rx) throw new Error("Prescription not found");
     rx.status = "dispensed";
     rx.dispensed_at = new Date().toISOString();
-    const totalAmount = (rx.items || []).reduce((acc: number, it: any) => acc + (Number(it.qty) || 1) * 35, 0);
+    let rxItems = rx.items;
+    if (typeof rxItems === "string") {
+      try { rxItems = JSON.parse(rxItems); } catch { rxItems = []; }
+    }
+    rx.items = rxItems;
+    const totalAmount = (rxItems || []).reduce((acc: number, it: any) => acc + (Number(it.qty) || 1) * 35, 0);
     db.charges.push({
       id: db.charges.length + 1,
       patient_id: rx.patient_id,

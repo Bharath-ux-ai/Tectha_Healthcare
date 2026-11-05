@@ -11,7 +11,7 @@ export const NAV: NavItem[] = [
   { href: "/operations", label: "Hospital Operations", icon: Building2, roles: ["admin", "doctor", "nurse", "receptionist"], module: "Hospital Operations" },
   { href: "/finance", label: "Billing & Finance", icon: Wallet, roles: ["admin", "accountant", "receptionist"], module: "Financial Management" },
   { href: "/diagnostics", label: "Lab & Radiology", icon: FlaskConical, roles: ["admin", "lab", "doctor"], module: "Diagnostics & Pharmacy" },
-  { href: "/pharmacy", label: "Pharmacy", icon: Pill, roles: ["admin", "pharmacist"], module: "Diagnostics & Pharmacy" },
+  { href: "/pharmacy", label: "Pharmacy", icon: Pill, roles: ["admin", "pharmacist", "doctor", "nurse", "receptionist", "accountant"], module: "Diagnostics & Pharmacy" },
   { href: "/engagement", label: "Patient Engagement", icon: HeartHandshake, roles: ["admin", "receptionist"], module: "Patient Engagement" },
   { href: "/portal", label: "My Health Portal", icon: UserRound, roles: ["patient"], module: "Patient Portal" },
 ];
